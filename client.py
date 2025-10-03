@@ -6,7 +6,7 @@ PORT = 65432
 def main():
     
     print("--- Cliente Interativo Chave-Valor ---")
-    print("Comandos disponíveis: PUT <chave> <valor> | GET <chave> | DELETE <chave> | DUMP | exit")
+    print("Comandos disponíveis: POST <chave> <valor> (criar) | PUT <chave> <valor> (atualizar) | GET <chave> | DELETE <chave> | DUMP | exit")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:

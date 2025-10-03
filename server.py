@@ -47,13 +47,28 @@ def handle_client(conn: socket.socket, addr, task_queue: multiprocessing.Queue):
                 
                 response = ""
 
-                if command == 'PUT' and len(parts) == 3:
+                # POST: criar somente (falha se a chave já existir)
+                if command == 'POST' and len(parts) == 3:
                     key, value = parts[1], parts[2]
                     with db_lock:
-                        db_data[key] = value
-                    
-                    task_queue.put(('PERSIST', key, value))
-                    response = "OK"
+                        if key in db_data:
+                            response = "ALREADY_EXISTS"
+                        else:
+                            db_data[key] = value
+                            # Enfileira tarefa de persistência/assíncrona
+                            task_queue.put(('PERSIST', key, value))
+                            response = "OK"
+
+                # PUT: atualizar somente (falha se a chave não existir)
+                elif command == 'PUT' and len(parts) == 3:
+                    key, value = parts[1], parts[2]
+                    with db_lock:
+                        if key in db_data:
+                            db_data[key] = value
+                            task_queue.put(('PERSIST', key, value))
+                            response = "OK"
+                        else:
+                            response = "NOT_FOUND"
 
                 elif command == 'GET' and len(parts) == 2:
                     key = parts[1]

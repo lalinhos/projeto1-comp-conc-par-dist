@@ -19,16 +19,21 @@ def run_test_client(client_id: int):
             s.connect((HOST, PORT))
 
             for i in range(OPS_PER_CLIENT):
-                op = random.choice(['PUT', 'PUT', 'GET', 'DELETE'])
+                # now include both POST (create-only) and PUT (update-only)
+                op = random.choice(['POST', 'PUT', 'GET', 'DELETE'])
                 key = f"key_{client_id}_{(i % 10)}"
                 
                 command = ""
                 
-                if op == 'PUT':
+                if op == 'POST':
+                    # create-only: will succeed only if key not present on server
                     value = f"val_{client_id}_{i}"
+                    command = f"POST {key} {value}"
+
+                elif op == 'PUT':
+                    # update-only: will succeed only if key already present
+                    value = f"val_{client_id}_{i}_up"
                     command = f"PUT {key} {value}"
-                    with state_lock:
-                        expected_final_state[key] = value
 
                 elif op == 'GET':
                     command = f"GET {key}"
@@ -40,7 +45,21 @@ def run_test_client(client_id: int):
                             del expected_final_state[key]
                 
                 s.sendall(command.encode('utf-8'))
-                s.recv(1024)
+                resp = s.recv(1024).decode('utf-8')
+
+                # Update local expected_final_state only when server confirmed OK
+                with state_lock:
+                    if command.startswith('POST') and resp == 'OK':
+                        # extract value from command
+                        _, k, v = command.split()
+                        expected_final_state[k] = v
+                    elif command.startswith('PUT') and resp == 'OK':
+                        _, k, v = command.split()
+                        expected_final_state[k] = v
+                    elif command.startswith('DELETE') and resp == 'OK':
+                        _, k = command.split()
+                        if k in expected_final_state:
+                            del expected_final_state[k]
                 
                 time.sleep(random.uniform(0.01, 0.05))
 
