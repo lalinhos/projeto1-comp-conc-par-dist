@@ -53,6 +53,8 @@ python client.py
 ```
 Você pode agora digitar comandos: 
 
+- POST minha_chave meu_valor
+
 - PUT minha_chave meu_valor 
 
 - GET minha_chave 
