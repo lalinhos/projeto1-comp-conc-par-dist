@@ -112,4 +112,7 @@ O script irá:
 - Graceful Shutdown: Implementar um mecanismo para que o servidor notifique os clientes sobre um desligamento iminente, permitindo que eles se desconectem de forma limpa. 
 
 
-- Replicação: Para alta disponibilidade, estender a tarefa do worker para replicar as operações de escrita em outros servidores-réplica, tornando o sistema tolerante a falhas. 
+- Replicação: Para alta disponibilidade, estender a tarefa do worker para replicar as operações de escrita em outros servidores-réplica, tornando o sistema tolerante a falhas.
+
+<img width="1984" height="666" alt="image" src="https://github.com/user-attachments/assets/c936ea64-b135-4150-b871-5aa1495e4d17" />
+
