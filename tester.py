@@ -6,122 +6,96 @@ import json
 
 HOST = '127.0.0.1'
 PORT = 65432
-NUM_CLIENTS = 20
-OPS_PER_CLIENT = 50 
+NUM_CLIENTES = 20
+OPS_POR_CLIENTE = 50
 
-expected_final_state = {}
-state_lock = threading.Lock()
+estado_esperado = {}
+estado_lock = threading.Lock()
 
-def run_test_client(client_id: int):
-    print(f"[Cliente de Teste {client_id}] Iniciando...")
+def cliente_teste(id_cliente: int):
+    print(f"[ClienteTeste {id_cliente}] Iniciando...")
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((HOST, PORT))
+            for i in range(OPS_POR_CLIENTE):
+                operacao = random.choice(['CRIAR', 'EDITAR', 'VER', 'DELETAR'])
+                id_produto = f"P{id_cliente}_{i % 10}"
+                comando = ""
 
-            for i in range(OPS_PER_CLIENT):
-                # now include both POST (create-only) and PUT (update-only)
-                op = random.choice(['POST', 'PUT', 'GET', 'DELETE'])
-                key = f"key_{client_id}_{(i % 10)}"
-                
-                command = ""
-                
-                if op == 'POST':
-                    # create-only: will succeed only if key not present on server
-                    value = f"val_{client_id}_{i}"
-                    command = f"POST {key} {value}"
+                if operacao == 'CRIAR':
+                    nome = f"Produto_{id_cliente}_{i}"
+                    comando = f"CRIAR PRODUTO {id_produto} {nome}"
 
-                elif op == 'PUT':
-                    # update-only: will succeed only if key already present
-                    value = f"val_{client_id}_{i}_up"
-                    command = f"PUT {key} {value}"
+                elif operacao == 'EDITAR':
+                    nome = f"Produto_{id_cliente}_{i}_editado"
+                    comando = f"EDITAR PRODUTO {id_produto} {nome}"
 
-                elif op == 'GET':
-                    command = f"GET {key}"
+                elif operacao == 'VER':
+                    comando = f"VER PRODUTO {id_produto}"
 
-                elif op == 'DELETE':
-                    command = f"DELETE {key}"
-                    with state_lock:
-                        if key in expected_final_state:
-                            del expected_final_state[key]
-                
-                s.sendall(command.encode('utf-8'))
+                elif operacao == 'DELETAR':
+                    comando = f"DELETAR PRODUTO {id_produto}"
+                    with estado_lock:
+                        estado_esperado.pop(id_produto, None)
+
+                s.sendall(comando.encode('utf-8'))
                 resp = s.recv(1024).decode('utf-8')
 
-                # Update local expected_final_state only when server confirmed OK
-                with state_lock:
-                    if command.startswith('POST') and resp == 'OK':
-                        # extract value from command
-                        _, k, v = command.split()
-                        expected_final_state[k] = v
-                    elif command.startswith('PUT') and resp == 'OK':
-                        _, k, v = command.split()
-                        expected_final_state[k] = v
-                    elif command.startswith('DELETE') and resp == 'OK':
-                        _, k = command.split()
-                        if k in expected_final_state:
-                            del expected_final_state[k]
-                
+                with estado_lock:
+                    if comando.startswith('CRIAR') and resp == 'OK':
+                        _, _, pid, nome = comando.split()
+                        estado_esperado[pid] = nome
+                    elif comando.startswith('EDITAR') and resp == 'OK':
+                        _, _, pid, nome = comando.split()
+                        estado_esperado[pid] = nome
+                    elif comando.startswith('DELETAR') and resp == 'OK':
+                        _, _, pid = comando.split()
+                        estado_esperado.pop(pid, None)
+
                 time.sleep(random.uniform(0.01, 0.05))
-
     except Exception as e:
-        print(f"[Cliente de Teste {client_id}] Erro: {e}")
-    
-    print(f"[Cliente de Teste {client_id}] Concluído.")
-
+        print(f"[ClienteTeste {id_cliente}] Erro: {e}")
+    print(f"[ClienteTeste {id_cliente}] Concluído.")
 
 def main():
-    print("--- Testador de Concorrência e Consistência ---")
-    
+    print("--- Testador de Concorrência do Cadastro de Produtos ---")
     threads = []
-    
-    print(f"Iniciando {NUM_CLIENTS} clientes concorrentes...")
-    start_time = time.time()
+    inicio = time.time()
 
-    for i in range(NUM_CLIENTS):
-        thread = threading.Thread(target=run_test_client, args=(i,))
-        threads.append(thread)
-        thread.start()
+    for i in range(NUM_CLIENTES):
+        t = threading.Thread(target=cliente_teste, args=(i,))
+        threads.append(t)
+        t.start()
 
-    for thread in threads:
-        thread.join()
+    for t in threads:
+        t.join()
 
-    end_time = time.time()
-    total_ops = NUM_CLIENTS * OPS_PER_CLIENT
-    print(f"\nFase de operações concluída em {end_time - start_time:.2f} segundos.")
-    print(f"Total de operações: {total_ops}")
-    print(f"Throughput: {total_ops / (end_time - start_time):.2f} ops/segundo.")
+    fim = time.time()
+    total_ops = NUM_CLIENTES * OPS_POR_CLIENTE
+    print(f"\nConcluído em {fim - inicio:.2f}s ({total_ops/(fim - inicio):.2f} ops/s)")
 
-    print("\n--- Fase de Validação ---")
-    print("Buscando o estado final do servidor...")
-
+    print("\n--- Validação do Estado Final ---")
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((HOST, PORT))
-            s.sendall(b'DUMP')
-            full_response = b''
+            s.sendall(b'HISTORICO')
+            resposta = b''
             while True:
                 chunk = s.recv(4096)
                 if not chunk:
                     break
-                full_response += chunk
-            
-            server_state = json.loads(full_response.decode('utf-8'))
-            
-            print(f"Itens esperados: {len(expected_final_state)}")
-            print(f"Itens no servidor: {len(server_state)}")
+                resposta += chunk
+            servidor_estado = json.loads(resposta.decode('utf-8'))
 
-            expected_sorted = sorted(expected_final_state.items())
-            server_sorted = sorted(server_state.items())
+            print(f"Itens esperados: {len(estado_esperado)}")
+            print(f"Itens no servidor: {len(servidor_estado)}")
 
-            if expected_sorted == server_sorted:
-                print("\n✅ SUCESSO: O estado final do servidor é consistente com o esperado!")
+            if sorted(estado_esperado.items()) == sorted(servidor_estado.items()):
+                print("\n SUCESSO: Estado do servidor consistente!")
             else:
-                print("\n❌ FALHA: Inconsistência detectada no estado final do servidor!")
-                
-
+                print("\n FALHA: Estado inconsistente!")
     except Exception as e:
-        print(f"Erro durante a validação: {e}")
-
+        print(f"Erro na validação: {e}")
 
 if __name__ == '__main__':
     main()

@@ -8,32 +8,28 @@ import os
 HOST = '127.0.0.1'
 PORT = 65432
 NUM_WORKERS = 2
-db_data = {}
+cadastro_produtos = {}
 
-db_lock = threading.Lock()
+cadastro_lock = threading.Lock()
 
-def heavy_task_worker(task_queue: multiprocessing.Queue, worker_id: int):
-
+def worker_tarefa_pesada(fila_tarefas: multiprocessing.Queue, worker_id: int):
     print(f"[Worker {worker_id}] Processo iniciado (PID: {os.getpid()}). Aguardando tarefas.")
     while True:
         try:
-            task = task_queue.get()
-            if task is None:
-                print(f"[Worker {worker_id}] Sinal de término recebido. Encerrando.")
+            tarefa = fila_tarefas.get()
+            if tarefa is None:
+                print(f"[Worker {worker_id}] Encerrando.")
                 break
 
-            operation, key, value = task
-            print(f"[Worker {worker_id}] Processando tarefa '{operation}' para a chave '{key}'...")
-
+            operacao, id_produto, nome_produto = tarefa
+            print(f"[Worker {worker_id}] Processando '{operacao}' para produto '{id_produto}'...")
             time.sleep(1.5)
-
-            print(f"[Worker {worker_id}] Tarefa '{operation}' para a chave '{key}' concluída.")
+            print(f"[Worker {worker_id}] Concluído: '{operacao}' para produto '{id_produto}'.")
 
         except Exception as e:
             print(f"[Worker {worker_id}] Erro: {e}")
 
-def handle_client(conn: socket.socket, addr, task_queue: multiprocessing.Queue):
-    
+def lidar_com_cliente(conn: socket.socket, addr, fila_tarefas: multiprocessing.Queue):
     print(f"[Thread {threading.get_ident()}] Conectado por {addr}")
     with conn:
         while True:
@@ -41,110 +37,101 @@ def handle_client(conn: socket.socket, addr, task_queue: multiprocessing.Queue):
                 data = conn.recv(1024)
                 if not data:
                     break
-                command_str = data.decode('utf-8').strip()
-                parts = command_str.split()
-                command = parts[0].upper()
-                
-                response = ""
+                comando_str = data.decode('utf-8').strip()
+                partes = comando_str.split()
+                resposta = ""
 
-                # POST: criar somente (falha se a chave já existir)
-                if command == 'POST' and len(parts) == 3:
-                    key, value = parts[1], parts[2]
-                    with db_lock:
-                        if key in db_data:
-                            response = "ALREADY_EXISTS"
+                if not partes:
+                    continue
+
+                comando = partes[0].upper()
+
+                # --- Comandos em português ---
+
+                # Criar produto
+                if comando == 'CRIAR' and len(partes) >= 3 and partes[1].upper() == 'PRODUTO':
+                    id_produto, nome_produto = partes[2], partes[3]
+                    with cadastro_lock:
+                        if id_produto in cadastro_produtos:
+                            resposta = "JA_EXISTE"
                         else:
-                            db_data[key] = value
-                            # Enfileira tarefa de persistência/assíncrona
-                            task_queue.put(('PERSIST', key, value))
-                            response = "OK"
+                            cadastro_produtos[id_produto] = nome_produto
+                            fila_tarefas.put(('SALVAR', id_produto, nome_produto))
+                            resposta = "OK"
 
-                # PUT: atualizar somente (falha se a chave não existir)
-                elif command == 'PUT' and len(parts) == 3:
-                    key, value = parts[1], parts[2]
-                    with db_lock:
-                        if key in db_data:
-                            db_data[key] = value
-                            task_queue.put(('PERSIST', key, value))
-                            response = "OK"
+                # Editar produto
+                elif comando == 'EDITAR' and len(partes) >= 3 and partes[1].upper() == 'PRODUTO':
+                    id_produto, nome_produto = partes[2], partes[3]
+                    with cadastro_lock:
+                        if id_produto in cadastro_produtos:
+                            cadastro_produtos[id_produto] = nome_produto
+                            fila_tarefas.put(('SALVAR', id_produto, nome_produto))
+                            resposta = "OK"
                         else:
-                            response = "NOT_FOUND"
+                            resposta = "NAO_ENCONTRADO"
 
-                elif command == 'GET' and len(parts) == 2:
-                    key = parts[1]
-                    with db_lock:
-                        value = db_data.get(key, "NULL")
-                    response = value
+                # Ver produto
+                elif comando == 'VER' and len(partes) == 3 and partes[1].upper() == 'PRODUTO':
+                    id_produto = partes[2]
+                    with cadastro_lock:
+                        resposta = cadastro_produtos.get(id_produto, "NAO_ENCONTRADO")
 
-                elif command == 'DELETE' and len(parts) == 2:
-                    key = parts[1]
-                    with db_lock:
-                        if key in db_data:
-                            del db_data[key]
-                            response = "OK"
-                            task_queue.put(('DELETE_PERSIST', key, None))
+                # Deletar produto
+                elif comando == 'DELETAR' and len(partes) == 3 and partes[1].upper() == 'PRODUTO':
+                    id_produto = partes[2]
+                    with cadastro_lock:
+                        if id_produto in cadastro_produtos:
+                            del cadastro_produtos[id_produto]
+                            fila_tarefas.put(('REMOVER', id_produto, None))
+                            resposta = "OK"
                         else:
-                            response = "NOT_FOUND"
-                
-                elif command == 'DUMP' and len(parts) == 1:
-                    with db_lock:
-                        response = json.dumps(db_data)
-                
+                            resposta = "NAO_ENCONTRADO"
+
+                # Histórico (listar todos)
+                elif comando == 'HISTÓRICO':
+                    with cadastro_lock:
+                        resposta = json.dumps(cadastro_produtos)
+
                 else:
-                    response = "INVALID_COMMAND"
+                    resposta = "COMANDO_INVALIDO"
 
-                conn.sendall(response.encode('utf-8'))
+                conn.sendall(resposta.encode('utf-8'))
 
             except ConnectionResetError:
-                print(f"[Thread {threading.get_ident()}] Conexão com {addr} reiniciada.")
+                print(f"[Thread {threading.get_ident()}] Conexão com {addr} perdida.")
                 break
             except Exception as e:
-                print(f"[Thread {threading.get_ident()}] Erro ao lidar com {addr}: {e}")
+                print(f"[Thread {threading.get_ident()}] Erro: {e}")
                 break
-    
-    print(f"[Thread {threading.get_ident()}] Conexão com {addr} fechada.")
-
+    print(f"[Thread {threading.get_ident()}] Conexão encerrada com {addr}")
 
 def main():
-    print("--- Servidor Chave-Valor Distribuído ---")
-
-    task_queue = multiprocessing.Queue()
+    print("--- Servidor de Cadastro de Produtos ---")
+    fila_tarefas = multiprocessing.Queue()
     workers = []
     for i in range(NUM_WORKERS):
-        process = multiprocessing.Process(target=heavy_task_worker, args=(task_queue, i + 1))
-        workers.append(process)
-        process.start()
-    
+        processo = multiprocessing.Process(target=worker_tarefa_pesada, args=(fila_tarefas, i+1))
+        workers.append(processo)
+        processo.start()
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((HOST, PORT))
         s.listen()
-        print(f"[Servidor Principal] Ouvindo em {HOST}:{PORT}")
-        print(f"[Servidor Principal] PID do processo principal: {os.getpid()}")
+        print(f"[Servidor] Ouvindo em {HOST}:{PORT}")
 
         try:
             while True:
                 conn, addr = s.accept()
-                # Para cada nova conexão, uma nova thread é criada para lidar com ela
-                client_thread = threading.Thread(
-                    target=handle_client,
-                    args=(conn, addr, task_queue)
-                )
-                client_thread.start()
+                threading.Thread(target=lidar_com_cliente, args=(conn, addr, fila_tarefas)).start()
         except KeyboardInterrupt:
-            print("\n[Servidor Principal] Encerrando o servidor...")
+            print("\n[Servidor] Encerrando...")
         finally:
-            # Envia sinal de término para todos os workers
             for _ in workers:
-                task_queue.put(None)
-            
-            # Aguarda o término dos processos workers
+                fila_tarefas.put(None)
             for p in workers:
                 p.join()
-            
-            print("[Servidor Principal] Todos os workers foram encerrados.")
-            print("[Servidor Principal] Servidor desligado.")
-
+            print("[Servidor] Finalizado.")
 
 if __name__ == '__main__':
     main()

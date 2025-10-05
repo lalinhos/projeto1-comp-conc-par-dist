@@ -4,38 +4,33 @@ HOST = '127.0.0.1'
 PORT = 65432
 
 def main():
-    
-    print("--- Cliente Interativo Chave-Valor ---")
-    print("Comandos disponíveis: POST <chave> <valor> (criar) | PUT <chave> <valor> (atualizar) | GET <chave> | DELETE <chave> | DUMP | exit")
+    print("--- Cliente Interativo de Produtos ---")
+    print("Comandos disponíveis:")
+    print("CRIAR PRODUTO <id> <nome>")
+    print("EDITAR PRODUTO <id> <nome>")
+    print("VER PRODUTO <id>")
+    print("DELETAR PRODUTO <id>")
+    print("HISTÓRICO")
+    print("SAIR")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.connect((HOST, PORT))
-            print(f"Conectado ao servidor em {HOST}:{PORT}")
+            print(f"Conectado ao servidor {HOST}:{PORT}")
         except ConnectionRefusedError:
-            print(f"Erro: Não foi possível conectar ao servidor. Ele está em execução?")
+            print("Erro: servidor não encontrado.")
             return
 
         while True:
-            try:
-                command = input("> ")
-                if not command or command.lower() == 'exit':
-                    break
-
-                s.sendall(command.encode('utf-8'))
-
-                response = s.recv(4096).decode('utf-8')
-                print(f"Resposta do servidor: {response}")
-
-            except KeyboardInterrupt:
-                print("\nEncerrando o cliente.")
+            comando = input("> ")
+            if not comando or comando.lower() == 'sair':
                 break
-            except Exception as e:
-                print(f"Ocorreu um erro: {e}")
-                break
-    
-    print("Conexão fechada.")
 
+            s.sendall(comando.encode('utf-8'))
+            resposta = s.recv(4096).decode('utf-8')
+            print(f"Resposta: {resposta}")
+
+    print("Conexão encerrada.")
 
 if __name__ == '__main__':
     main()
